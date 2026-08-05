@@ -57,6 +57,7 @@ function App() {
   const [audioDevices, setAudioDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('default'); // 'default', 'loopback', or actual device ID
   const [isAutoTune, setIsAutoTune] = useState(false);
+  const [isAutoWpm, setIsAutoWpm] = useState(false);
   const lastAutoTuneTimeRef = useRef(0);
 
   // --- MANUAL KEYER STATE ---
@@ -224,6 +225,10 @@ function App() {
         deviceId: selectedDeviceId !== 'default' && selectedDeviceId !== 'loopback' ? selectedDeviceId : null,
         isLoopback: selectedDeviceId === 'loopback',
         dualPitchMode: dualPitch,
+        autoWpm: isAutoWpm,
+        onWpmChange: (newWpm) => {
+          setWpm(newWpm);
+        },
         onPitchChange: (newPitch) => {
           setPitch(newPitch);
         },
@@ -294,8 +299,9 @@ function App() {
       morseReceiverRef.current.setBasePitch(pitch);
       morseReceiverRef.current.setWpm(wpm);
       morseReceiverRef.current.setDualPitchMode(dualPitch);
+      morseReceiverRef.current.setAutoWpm(isAutoWpm);
     }
-  }, [pitch, wpm, dualPitch]);
+  }, [pitch, wpm, dualPitch, isAutoWpm]);
 
   // --- MANUAL KEYER PRACTICE (CW KEY) ---
   const handleKeyStart = (e) => {
@@ -923,20 +929,20 @@ function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 font-mono">
+                <div className="grid grid-cols-4 gap-2 font-mono">
                   {/* Current decoding buffer */}
                   <div className="flex flex-col gap-1">
-                    <span className="text-zinc-500 text-[10px]">CURRENT SYMBOL</span>
-                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-center text-sm font-extrabold text-emerald-400 min-h-[2.25rem] tracking-wider leading-relaxed">
-                      {rxCurrentMorseBuffer || <span className="text-zinc-800 text-xs">-</span>}
+                    <span className="text-zinc-500 text-[9px] uppercase tracking-tighter">SYMBOL</span>
+                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-center text-xs font-extrabold text-emerald-400 min-h-[2.25rem] tracking-wider leading-relaxed">
+                      {rxCurrentMorseBuffer || <span className="text-zinc-800 text-[10px]">-</span>}
                     </div>
                   </div>
                   
                   {/* Visual LED status */}
                   <div className="flex flex-col gap-1">
-                    <span className="text-zinc-500 text-[10px]">DEMODULATOR</span>
-                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 flex items-center justify-center gap-1.5 text-[10px] min-h-[2.25rem]">
-                      <span className={`w-2.5 h-2.5 rounded-full ${isRxSignalActive ? 'bg-emerald-400 animate-pulse shadow-[0_0_6px_#10b981]' : 'bg-zinc-850'}`}></span>
+                    <span className="text-zinc-500 text-[9px] uppercase tracking-tighter">DEMODULATOR</span>
+                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-1 flex items-center justify-center gap-1 text-[8px] min-h-[2.25rem]">
+                      <span className={`w-2 h-2 rounded-full ${isRxSignalActive ? 'bg-emerald-400 animate-pulse shadow-[0_0_6px_#10b981]' : 'bg-zinc-850'}`}></span>
                       <span className={isRxSignalActive ? 'text-emerald-400 font-bold' : 'text-zinc-600'}>
                         {isRxSignalActive ? 'ACTIVE' : 'STATIC'}
                       </span>
@@ -945,12 +951,23 @@ function App() {
 
                   {/* Auto-Tune (ATN) Button */}
                   <div className="flex flex-col gap-1">
-                    <span className="text-zinc-500 text-[10px]">AUTO-TUNE</span>
+                    <span className="text-zinc-500 text-[9px] uppercase tracking-tighter">AUTO-TUNE</span>
                     <button
                       onClick={() => setIsAutoTune(!isAutoTune)}
-                      className={`w-full py-1 px-1 rounded text-[10px] font-bold border transition min-h-[2.25rem] ${isAutoTune ? 'bg-emerald-950/40 border-emerald-500 text-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.2)]' : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                      className={`w-full py-1 px-0.5 rounded text-[9px] font-bold border transition min-h-[2.25rem] ${isAutoTune ? 'bg-emerald-950/40 border-emerald-500 text-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.2)]' : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
                     >
                       {isAutoTune ? 'ATN: ON' : 'ATN: OFF'}
+                    </button>
+                  </div>
+
+                  {/* Auto-WPM (ATW) Button */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[9px] uppercase tracking-tighter">AUTO-WPM</span>
+                    <button
+                      onClick={() => setIsAutoWpm(!isAutoWpm)}
+                      className={`w-full py-1 px-0.5 rounded text-[9px] font-bold border transition min-h-[2.25rem] ${isAutoWpm ? 'bg-emerald-950/40 border-emerald-500 text-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.2)]' : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      {isAutoWpm ? 'ATW: ON' : 'ATW: OFF'}
                     </button>
                   </div>
                 </div>

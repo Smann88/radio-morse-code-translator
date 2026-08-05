@@ -12,6 +12,7 @@ export class MorseMicReceiver {
     this.onCharacterDecoded = options.onCharacterDecoded || null; // ('A', '.-')
     this.onWordDecoded = options.onWordDecoded || null; // ('HELLO')
     this.onPitchChange = options.onPitchChange || null; // (newPitchHz)
+    this.onWpmChange = options.onWpmChange || null; // (newWpm)
     this.onError = options.onError || null;
 
     this.deviceId = options.deviceId || null;
@@ -20,6 +21,8 @@ export class MorseMicReceiver {
     this.basePitch = options.pitch || 700;
     this.dualPitchMode = options.dualPitchMode || false;
     this.activeTonePitch = options.pitch || 700;
+    this.autoWpm = options.autoWpm || false;
+    this.dotHistory = [getDotLength(this.wpm)];
 
     // Web Audio State
     this.audioContext = null;
@@ -45,6 +48,16 @@ export class MorseMicReceiver {
 
   setWpm(wpm) {
     this.wpm = wpm;
+    if (!this.autoWpm) {
+      this.dotHistory = [getDotLength(wpm)];
+    }
+  }
+
+  setAutoWpm(enabled) {
+    this.autoWpm = enabled;
+    if (!enabled) {
+      this.dotHistory = [getDotLength(this.wpm)];
+    }
   }
 
   setBasePitch(basePitch) {
@@ -136,8 +149,8 @@ export class MorseMicReceiver {
       this.basePitch = this.pitch;
       this.activeTonePitch = this.pitch;
       
-      // Start high-frequency polling interval (250Hz sampling rate)
-      this.timerId = setInterval(this.loop, 4);
+      // Start polling FFT data
+      this.loop();
     } catch (err) {
       if (this.onError) this.onError(err);
       this.stop();
@@ -146,10 +159,6 @@ export class MorseMicReceiver {
 
   stop() {
     this.isListening = false;
-    if (this.timerId) {
-      clearInterval(this.timerId);
-      this.timerId = null;
-    }
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -177,6 +186,8 @@ export class MorseMicReceiver {
 
   loop = () => {
     if (!this.isListening || !this.analyserNode) return;
+    
+    this.animationFrameId = requestAnimationFrame(this.loop);
     
     const fftSize = this.analyserNode.fftSize;
     const sampleRate = this.audioContext.sampleRate;
@@ -269,12 +280,39 @@ export class MorseMicReceiver {
   };
 
   processSignalTransition(wasActive, duration) {
-    const dotLen = getDotLength(this.wpm);
-    
     if (wasActive) {
       // TONE ENDED (Signal goes from High -> Low)
       // Compensate for Web Audio analyser FFT windowing latency (inherent ~21ms window size)
-      const adjustedDuration = duration - 12; 
+      const adjustedDuration = Math.max(10, duration - 12); 
+      let currentWpm = this.wpm;
+      let dotLen = getDotLength(currentWpm);
+
+      // Adaptive WPM speed tracking ( Париж / PARIS standard )
+      if (this.autoWpm && adjustedDuration > 15) {
+        let detectedDot = adjustedDuration;
+        // Midpoint of 2.2 * current dotLen separates dot and dash candidates
+        if (adjustedDuration >= dotLen * 2.2) {
+          detectedDot = adjustedDuration / 3.0; // dah is 3 units
+        }
+        
+        this.dotHistory.push(detectedDot);
+        if (this.dotHistory.length > 8) {
+          this.dotHistory.shift();
+        }
+        
+        const avgDot = this.dotHistory.reduce((sum, val) => sum + val, 0) / this.dotHistory.length;
+        const clampedDot = Math.max(30, Math.min(240, avgDot)); // Bounds: 5 WPM to 40 WPM
+        
+        const newWpm = Math.round(1200 / clampedDot);
+        if (newWpm !== this.wpm) {
+          this.wpm = newWpm;
+          currentWpm = newWpm;
+          dotLen = getDotLength(newWpm);
+          if (this.onWpmChange) {
+            this.onWpmChange(newWpm);
+          }
+        }
+      }
       
       // Check for dual-pitch Morse classification
       // If the tone pitch is at least 35Hz above the baseline, it is classified as a dit (.)
@@ -291,7 +329,7 @@ export class MorseMicReceiver {
         symbol = isDash ? '-' : '.';
       }
       
-      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 2.2)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${this.wpm}, ToneFreq: ${this.activeTonePitch}Hz). Decoded Symbol: "${symbol}"`);
+      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 2.2)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${currentWpm}, ToneFreq: ${this.activeTonePitch}Hz). Decoded Symbol: "${symbol}"`);
       
       if (adjustedDuration > 15) { // Ensure minimum symbol length
         this.currentMorseChar += symbol;
@@ -304,14 +342,14 @@ export class MorseMicReceiver {
         clearTimeout(this.charTimeout);
         clearTimeout(this.wordTimeout);
         
-        // Spacing: Letter space is 3 units (threshold at 3.5), Word space is 7 units (threshold at 6.5)
+        // Spacing: Letter space is 3 units, Word space is 7 units
         this.charTimeout = setTimeout(() => {
           this.flushCharacter();
-        }, dotLen * 3.5);
+        }, dotLen * 2.5);
         
         this.wordTimeout = setTimeout(() => {
           this.flushWord();
-        }, dotLen * 6.5);
+        }, dotLen * 5.5);
       }
     } else {
       // TONE STARTED (Signal goes from Low -> High)
