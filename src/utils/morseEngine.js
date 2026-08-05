@@ -182,6 +182,7 @@ export class MorsePlayer {
     this.activeGainNode = null;
     this.activeTimeouts = [];
     this.loopbackDestinationNode = null;
+    this.dualPitch = false;
   }
   
   initAudio() {
@@ -270,14 +271,20 @@ export class MorsePlayer {
     for (let i = 0; i < tokens.length; i++) {
       const char = tokens[i];
       if (char === '.') {
-        // Play dot
+        // Play dot (High-pitch if dual-pitch is enabled)
+        const tonePitch = this.dualPitch ? this.pitch + 80 : this.pitch;
+        osc.frequency.setValueAtTime(tonePitch, currentTime);
+        
         gainNode.gain.setValueAtTime(0, currentTime);
         gainNode.gain.linearRampToValueAtTime(this.volume, currentTime + 0.005);
         gainNode.gain.setValueAtTime(this.volume, currentTime + dotLen - 0.005);
         gainNode.gain.linearRampToValueAtTime(0, currentTime + dotLen);
         currentTime += dotLen;
       } else if (char === '-') {
-        // Play dash (3 dots)
+        // Play dash (3 dots, Low-pitch if dual-pitch is enabled)
+        const tonePitch = this.dualPitch ? this.pitch - 80 : this.pitch;
+        osc.frequency.setValueAtTime(tonePitch, currentTime);
+        
         const dashLen = dotLen * 3;
         gainNode.gain.setValueAtTime(0, currentTime);
         gainNode.gain.linearRampToValueAtTime(this.volume, currentTime + 0.005);

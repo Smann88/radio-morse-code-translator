@@ -33,6 +33,7 @@ function App() {
   const [wpm, setWpm] = useState(20);
   const [pitch, setPitch] = useState(700); // Hz
   const [volume, setVolume] = useState(0.4);
+  const [dualPitch, setDualPitch] = useState(false);
   const [showCheatSheet, setShowCheatSheet] = useState(true);
   
   // Audio Context Ref (Shared between Player and Receiver)
@@ -125,8 +126,9 @@ function App() {
       morsePlayerRef.current.pitch = pitch;
       morsePlayerRef.current.wpm = wpm;
       morsePlayerRef.current.volume = volume;
+      morsePlayerRef.current.dualPitch = dualPitch;
     }
-  }, [pitch, wpm, volume]);
+  }, [pitch, wpm, volume, dualPitch]);
 
   // Update Manual Keyer Parameters
   useEffect(() => {
@@ -221,6 +223,7 @@ function App() {
         threshold: rxThreshold,
         deviceId: selectedDeviceId !== 'default' && selectedDeviceId !== 'loopback' ? selectedDeviceId : null,
         isLoopback: selectedDeviceId === 'loopback',
+        dualPitchMode: dualPitch,
         onPitchChange: (newPitch) => {
           setPitch(newPitch);
         },
@@ -288,10 +291,11 @@ function App() {
 
   useEffect(() => {
     if (morseReceiverRef.current) {
-      morseReceiverRef.current.setPitch(pitch);
+      morseReceiverRef.current.setBasePitch(pitch);
       morseReceiverRef.current.setWpm(wpm);
+      morseReceiverRef.current.setDualPitchMode(dualPitch);
     }
-  }, [pitch, wpm]);
+  }, [pitch, wpm, dualPitch]);
 
   // --- MANUAL KEYER PRACTICE (CW KEY) ---
   const handleKeyStart = (e) => {
@@ -771,6 +775,25 @@ function App() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded p-3 font-mono text-sm text-zinc-100 placeholder-zinc-700 focus:outline-none focus:border-orange-500 resize-none uppercase"
                     disabled={isPlayingSequence}
                   />
+                </div>
+
+                {/* Dual Pitch Toggle Switch */}
+                <div className="flex items-center justify-between bg-zinc-950 p-3 border border-zinc-850 rounded font-mono text-xs">
+                  <div>
+                    <span className="text-zinc-300 font-bold flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-orange-400" />
+                      PITCH-KEYED MORSE (CW+ MODE)
+                    </span>
+                    <span className="text-[9px] text-zinc-500 leading-tight block mt-0.5">
+                      Transmits dits at +80Hz & dahs at -80Hz for ultra-accurate, timing-immune decoding
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setDualPitch(!dualPitch)}
+                    className={`py-1.5 px-4 rounded text-[10px] font-bold border transition ${dualPitch ? 'bg-orange-950/40 border-orange-500 text-orange-400 shadow-[0_0_6px_rgba(249,115,22,0.2)]' : 'bg-zinc-900 border-zinc-800 text-zinc-500'}`}
+                  >
+                    {dualPitch ? 'CW+: ACTIVE' : 'STANDARD'}
+                  </button>
                 </div>
 
                 <div className="flex flex-col gap-1.5">

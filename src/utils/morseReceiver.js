@@ -16,6 +16,10 @@ export class MorseMicReceiver {
 
     this.deviceId = options.deviceId || null;
     this.isLoopback = options.isLoopback || false;
+    
+    this.basePitch = options.pitch || 700;
+    this.dualPitchMode = options.dualPitchMode || false;
+    this.activeTonePitch = options.pitch || 700;
 
     // Web Audio State
     this.audioContext = null;
@@ -41,6 +45,15 @@ export class MorseMicReceiver {
 
   setWpm(wpm) {
     this.wpm = wpm;
+  }
+
+  setBasePitch(basePitch) {
+    this.basePitch = basePitch;
+    this.pitch = basePitch;
+  }
+
+  setDualPitchMode(enabled) {
+    this.dualPitchMode = enabled;
   }
 
   setPitch(pitch) {
@@ -120,6 +133,8 @@ export class MorseMicReceiver {
       this.signalActive = false;
       this.currentMorseChar = '';
       this.currentMorseWord = '';
+      this.basePitch = this.pitch;
+      this.activeTonePitch = this.pitch;
       
       // Start polling FFT data
       this.loop();
@@ -214,11 +229,15 @@ export class MorseMicReceiver {
     }
     
     // Auto-update the receiver's pitch if there is an active prominent beep in the band
-    // This allows the VFO to automatically track and sync to the tone's exact frequency!
-    if (isActiveNow && peakFreq >= 400 && peakFreq <= 1000 && peakFreq !== this.pitch) {
-      this.pitch = peakFreq;
-      if (this.onPitchChange) {
-        this.onPitchChange(peakFreq);
+    if (isActiveNow && peakFreq >= 400 && peakFreq <= 1000) {
+      this.activeTonePitch = peakFreq;
+      
+      // If NOT in dual-pitch mode, let the VFO auto-tune to follow the frequency
+      if (!this.dualPitchMode && peakFreq !== this.pitch) {
+        this.pitch = peakFreq;
+        if (this.onPitchChange) {
+          this.onPitchChange(peakFreq);
+        }
       }
     }
     
@@ -255,11 +274,22 @@ export class MorseMicReceiver {
       // Compensate for Web Audio analyser FFT windowing latency (usually around 20-30ms)
       const adjustedDuration = duration - 32; 
       
-      // Midpoint of 2.2 * dotLen is optimal for separating dots and dashes with safety headroom
-      const isDash = adjustedDuration >= (dotLen * 2.2);
-      const symbol = isDash ? '-' : '.';
+      // Check for dual-pitch Morse classification
+      // If the tone pitch is at least 35Hz above the baseline, it is classified as a dit (.)
+      // If it's at least 35Hz below the baseline, it is classified as a dah (-)
+      let symbol = '';
+      const pitchDiff = this.activeTonePitch - this.basePitch;
       
-      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 2.0)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${this.wpm}). Decoded Symbol: "${symbol}"`);
+      if (this.dualPitchMode && Math.abs(pitchDiff) >= 35) {
+        symbol = pitchDiff > 0 ? '.' : '-';
+        console.log(`📻 [DSP DECODER] Dual-Pitch Classification! Tone Freq: ${this.activeTonePitch}Hz (Base VFO: ${this.basePitch}Hz, Diff: ${pitchDiff}Hz) -> Decoded: "${symbol}"`);
+      } else {
+        // Standard Fallback: Midpoint of 2.2 * dotLen is optimal for separating dits and dashes
+        const isDash = adjustedDuration >= (dotLen * 2.2);
+        symbol = isDash ? '-' : '.';
+      }
+      
+      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 2.2)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${this.wpm}, ToneFreq: ${this.activeTonePitch}Hz). Decoded Symbol: "${symbol}"`);
       
       if (adjustedDuration > 15) { // Ensure minimum symbol length
         this.currentMorseChar += symbol;
