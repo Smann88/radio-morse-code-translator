@@ -340,3 +340,159 @@ export class MorsePlayer {
     this.stopBeep();
   }
 }
+
+/**
+ * Encodes an AudioBuffer to a standard 16-bit PCM WAV file Blob.
+ */
+export function bufferToWav(buffer) {
+  const numOfChan = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM raw
+  const bitDepth = 16;
+  
+  let result;
+  if (numOfChan === 2) {
+    result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
+  } else {
+    result = buffer.getChannelData(0);
+  }
+  
+  const bufferArr = new ArrayBuffer(44 + result.length * 2);
+  const view = new DataView(bufferArr);
+  
+  /* RIFF identifier */
+  writeString(view, 0, 'RIFF');
+  /* file length */
+  view.setUint32(4, 36 + result.length * 2, true);
+  /* RIFF type */
+  writeString(view, 8, 'WAVE');
+  /* format chunk identifier */
+  writeString(view, 12, 'fmt ');
+  /* format chunk length */
+  view.setUint32(16, 16, true);
+  /* sample format (raw) */
+  view.setUint16(20, format, true);
+  /* channel count */
+  view.setUint16(22, numOfChan, true);
+  /* sample rate */
+  view.setUint32(24, sampleRate, true);
+  /* byte rate (sample rate * block align) */
+  view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
+  /* block align (channel count * bytes per sample) */
+  view.setUint16(32, numOfChan * (bitDepth / 8), true);
+  /* bits per sample */
+  view.setUint16(34, bitDepth, true);
+  /* data chunk identifier */
+  writeString(view, 36, 'data');
+  /* data chunk length */
+  view.setUint32(40, result.length * 2, true);
+  
+  // Write PCM audio samples
+  let offset = 44;
+  for (let i = 0; i < result.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, result[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  
+  return new Blob([bufferArr], { type: 'audio/wav' });
+  
+  function interleave(inputL, inputR) {
+    const length = inputL.length + inputR.length;
+    const res = new Float32Array(length);
+    let index = 0;
+    let inputIndex = 0;
+    
+    while (index < length) {
+      res[index++] = inputL[inputIndex];
+      res[index++] = inputR[inputIndex];
+      inputIndex++;
+    }
+    return res;
+  }
+  
+  function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+}
+
+/**
+ * Renders a Morse code sequence silently in the background using OfflineAudioContext.
+ * Returns an AudioBuffer.
+ */
+export async function renderMorseAudio(morseStr, wpm, pitch, volume = 0.5, dualPitch = false) {
+  const dotLen = getDotLength(wpm) / 1000; // in seconds
+  const tokens = morseStr.split('');
+  
+  // Calculate exact duration
+  let totalDuration = 0.05; // pre-delay
+  for (let i = 0; i < tokens.length; i++) {
+    const char = tokens[i];
+    if (char === '.') {
+      totalDuration += dotLen * 2;
+    } else if (char === '-') {
+      totalDuration += dotLen * 4;
+    } else if (char === ' ') {
+      const nextChar = tokens[i + 1];
+      if (nextChar === '/') {
+        totalDuration += dotLen * 4;
+      } else {
+        totalDuration += dotLen * 2;
+      }
+    } else if (char === '/') {
+      totalDuration += dotLen * 2;
+    }
+  }
+  totalDuration += 0.5; // headroom
+
+  const sampleRate = 44100;
+  const offlineCtx = new OfflineAudioContext(1, Math.round(sampleRate * totalDuration), sampleRate);
+  
+  let currentTime = 0.05;
+  const osc = offlineCtx.createOscillator();
+  const gainNode = offlineCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = pitch;
+  
+  gainNode.gain.setValueAtTime(0, 0);
+  osc.connect(gainNode);
+  gainNode.connect(offlineCtx.destination);
+  osc.start(0);
+  
+  for (let i = 0; i < tokens.length; i++) {
+    const char = tokens[i];
+    if (char === '.') {
+      const tonePitch = dualPitch ? pitch + 80 : pitch;
+      osc.frequency.setValueAtTime(tonePitch, currentTime);
+      
+      gainNode.gain.setValueAtTime(0, currentTime);
+      gainNode.gain.linearRampToValueAtTime(volume, currentTime + 0.005);
+      gainNode.gain.setValueAtTime(volume, currentTime + dotLen - 0.005);
+      gainNode.gain.linearRampToValueAtTime(0, currentTime + dotLen);
+      currentTime += dotLen * 2;
+    } else if (char === '-') {
+      const tonePitch = dualPitch ? pitch - 80 : pitch;
+      osc.frequency.setValueAtTime(tonePitch, currentTime);
+      
+      const dashLen = dotLen * 3;
+      gainNode.gain.setValueAtTime(0, currentTime);
+      gainNode.gain.linearRampToValueAtTime(volume, currentTime + 0.005);
+      gainNode.gain.setValueAtTime(volume, currentTime + dashLen - 0.005);
+      gainNode.gain.linearRampToValueAtTime(0, currentTime + dashLen);
+      currentTime += (dashLen + dotLen);
+    } else if (char === ' ') {
+      const nextChar = tokens[i + 1];
+      if (nextChar === '/') {
+        currentTime += dotLen * 4;
+      } else {
+        currentTime += dotLen * 2;
+      }
+    } else if (char === '/') {
+      currentTime += dotLen * 2;
+    }
+  }
+  
+  osc.stop(currentTime);
+  return await offlineCtx.startRendering();
+}

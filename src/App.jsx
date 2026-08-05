@@ -15,14 +15,17 @@ import {
   Key, 
   Activity,
   Sliders,
-  AlertCircle
+  AlertCircle,
+  Download
 } from 'lucide-react';
 import { 
   textToMorse, 
   morseToText, 
   MorsePlayer, 
   ManualTapKeyer,
-  MORSE_MAP
+  MORSE_MAP,
+  renderMorseAudio,
+  bufferToWav
 } from './utils/morseEngine';
 import { MorseMicReceiver } from './utils/morseReceiver';
 
@@ -199,6 +202,29 @@ function App() {
     setIsPlayingSequence(false);
     setActiveTokenIndex(-1);
     setIsTxActive(false);
+  };
+
+  const [isDownloading, setIsDownloading] = useState(false);
+  
+  const handleDownload = async () => {
+    if (!morseOutput) return;
+    try {
+      setIsDownloading(true);
+      const renderedBuffer = await renderMorseAudio(morseOutput, wpm, pitch, volume, dualPitch);
+      const wavBlob = bufferToWav(renderedBuffer);
+      const url = URL.createObjectURL(wavBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `morse_transmission_${wpm}wpm_${pitch}hz.wav`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error rendering WAV download:", err);
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   // --- DSP MICROPHONE RECEIVER ---
@@ -824,7 +850,7 @@ function App() {
                 <div className="flex gap-3 mt-4">
                   <button
                     onClick={handleTransmit}
-                    className={`flex-1 py-3 px-6 rounded font-mono font-bold text-sm transition flex items-center justify-center gap-2 shadow ${isPlayingSequence ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-orange-500 hover:bg-orange-400 text-zinc-950'}`}
+                    className={`flex-1 py-3 px-4 rounded font-mono font-bold text-sm transition flex items-center justify-center gap-2 shadow ${isPlayingSequence ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-orange-500 hover:bg-orange-400 text-zinc-950'}`}
                   >
                     {isPlayingSequence ? (
                       <>
@@ -837,6 +863,14 @@ function App() {
                         AUTOMATED TRANSMIT
                       </>
                     )}
+                  </button>
+                  <button
+                    onClick={handleDownload}
+                    disabled={isPlayingSequence || !morseOutput || isDownloading}
+                    className="flex-1 py-3 px-4 rounded font-mono font-bold text-sm bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-100 transition flex items-center justify-center gap-2 border border-zinc-750 shadow active:scale-95"
+                  >
+                    <Download className="w-4 h-4 text-orange-400" />
+                    {isDownloading ? 'RENDERING...' : 'DOWNLOAD WAV'}
                   </button>
                   <button 
                     onClick={() => setInputText('')}
