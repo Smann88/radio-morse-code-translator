@@ -264,6 +264,22 @@ export class MorseMicReceiver {
       
       this.processSignalTransition(wasActive, duration);
     }
+
+    // --- REAL-TIME SILENCE-BASED SPACING FLUSHES (NO TIMEOUTS!) ---
+    if (!this.signalActive && this.lastStateChangeTime > 0) {
+      const silenceDuration = now - this.lastStateChangeTime;
+      const dotLen = getDotLength(this.wpm);
+      
+      // Flush character after 3.8 * dotLen of silence (generous safety margin to prevent premature character breaks)
+      if (silenceDuration >= dotLen * 3.8 && this.currentMorseChar !== '') {
+        this.flushCharacter();
+      }
+      
+      // Flush word after 6.8 * dotLen of silence (generous safety margin to prevent premature word breaks)
+      if (silenceDuration >= dotLen * 6.8 && this.currentMorseWord !== '') {
+        this.flushWord();
+      }
+    }
   };
 
   processSignalTransition(wasActive, duration) {
@@ -297,25 +313,10 @@ export class MorseMicReceiver {
         if (this.onSymbolDecoded) {
           this.onSymbolDecoded(symbol);
         }
-        
-        // Clear previous timeouts and set spacing flushes
-        clearTimeout(this.charTimeout);
-        clearTimeout(this.wordTimeout);
-        
-        // Spacing: Letter space is 3 units, Word space is 7 units
-        this.charTimeout = setTimeout(() => {
-          this.flushCharacter();
-        }, dotLen * 2.5);
-        
-        this.wordTimeout = setTimeout(() => {
-          this.flushWord();
-        }, dotLen * 5.5);
       }
     } else {
       // TONE STARTED (Signal goes from Low -> High)
-      // Silence ended: cancel pending character/word flushes
-      clearTimeout(this.charTimeout);
-      clearTimeout(this.wordTimeout);
+      // Silence ended
     }
   }
 
