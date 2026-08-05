@@ -64,23 +64,15 @@ export class MorseMicReceiver {
         await this.audioContext.resume();
       }
 
-      // Create an aggressive narrow Bandpass Filter
-      // Center frequency is the target beep pitch
-      // Q is Quality factor. Higher Q = narrower bandwidth. Q = 25 is excellent for isolating a beep.
-      this.filterNode = this.audioContext.createBiquadFilter();
-      this.filterNode.type = 'bandpass';
-      this.filterNode.frequency.setValueAtTime(this.pitch, this.audioContext.currentTime);
-      this.filterNode.Q.setValueAtTime(25, this.audioContext.currentTime);
-
       // Create Analyser for FFT power spectrum
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 2048;
-      this.analyserNode.smoothingTimeConstant = 0.4; // Slightly smooth out transient spikes
+      this.analyserNode.smoothingTimeConstant = 0.2; // Fast response for dits/dahs
 
       if (this.isLoopback) {
         // Loopback mode: Create a gain node that players can connect to directly
         this.loopbackInputNode = this.audioContext.createGain();
-        this.loopbackInputNode.connect(this.filterNode);
+        this.loopbackInputNode.connect(this.analyserNode);
       } else if (this.deviceId === 'system') {
         // System Audio Capture Mode
         this.mediaStream = await navigator.mediaDevices.getDisplayMedia({
@@ -103,7 +95,7 @@ export class MorseMicReceiver {
           throw new Error('No system audio track shared. Please check "Share system audio".');
         }
         this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-        this.sourceNode.connect(this.filterNode);
+        this.sourceNode.connect(this.analyserNode);
       } else {
         // Microphone Mode: Select the target device if specified
         const constraints = {
@@ -119,10 +111,8 @@ export class MorseMicReceiver {
         
         this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
         this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-        this.sourceNode.connect(this.filterNode);
+        this.sourceNode.connect(this.analyserNode);
       }
-
-      this.filterNode.connect(this.analyserNode);
 
       this.isListening = true;
       this.lastStateChangeTime = Date.now();
@@ -178,25 +168,36 @@ export class MorseMicReceiver {
     this.analyserNode.getByteFrequencyData(dataArray);
     
     // Find FFT bin corresponding to our target pitch
-    // binIndex = pitch * fftSize / sampleRate
     const targetBin = Math.round((this.pitch * fftSize) / sampleRate);
     
-    // Get amplitude around the target frequency (averaging nearby bins to account for slight frequency drift)
-    let sum = 0;
-    const binWindow = 2; // Check 2 bins on either side of targetBin
-    let count = 0;
-    
-    for (let i = targetBin - binWindow; i <= targetBin + binWindow; i++) {
+    // 1. Peak Amplitude (average of targetBin and its immediate neighbors for frequency drift)
+    let peakSum = 0;
+    let peakCount = 0;
+    for (let i = targetBin - 1; i <= targetBin + 1; i++) {
       if (i >= 0 && i < bufferLength) {
-        sum += dataArray[i];
-        count++;
+        peakSum += dataArray[i];
+        peakCount++;
       }
     }
-    
-    const targetAmplitude = count > 0 ? sum / count : 0;
-    
-    // Convert 0-255 amplitude to a relative strength index (0 to 100)
-    const signalStrength = (targetAmplitude / 255) * 100;
+    const peakAmplitude = peakCount > 0 ? peakSum / peakCount : 0;
+
+    // 2. Local Noise Floor Amplitude (average of slightly further away bins)
+    let noiseSum = 0;
+    let noiseCount = 0;
+    const noiseOffsets = [-8, -7, -6, -5, 5, 6, 7, 8];
+    for (const offset of noiseOffsets) {
+      const idx = targetBin + offset;
+      if (idx >= 0 && idx < bufferLength) {
+        noiseSum += dataArray[idx];
+        noiseCount++;
+      }
+    }
+    const noiseFloor = noiseCount > 0 ? noiseSum / noiseCount : 0;
+
+    // 3. Prominence Index (signal strength above local noise floor)
+    const diff = Math.max(0, peakAmplitude - noiseFloor);
+    // Scale so that a 20dB prominence matches 100% signal strength
+    const signalStrength = Math.min(100, (diff / 35) * 100);
     
     // Check signal state
     const isActiveNow = signalStrength > this.threshold;
@@ -317,8 +318,19 @@ export class MorseMicReceiver {
       }
     }
 
-    // Only report if the peak is prominent enough (amplitude > 55 out of 255)
-    if (maxVal > 55 && peakBin !== -1) {
+    // Calculate the average across the entire band to establish a local reference level
+    let bandSum = 0;
+    let bandCount = 0;
+    for (let i = minBin; i <= maxBin; i++) {
+      bandSum += dataArray[i];
+      bandCount++;
+    }
+    const bandAverage = bandCount > 0 ? bandSum / bandCount : 0;
+
+    // A real tone must stand out significantly (at least 30dB above the band average)
+    const prominence = maxVal - bandAverage;
+
+    if (maxVal > 60 && prominence > 30 && peakBin !== -1) {
       const detectedFrequency = Math.round((peakBin * sampleRate) / fftSize);
       return { frequency: detectedFrequency, amplitude: maxVal };
     }
