@@ -342,14 +342,14 @@ export class MorseMicReceiver {
         clearTimeout(this.charTimeout);
         clearTimeout(this.wordTimeout);
         
-        // Spacing: Letter space is 3 units, Word space is 7 units
+        // Spacing: Letter space is 3 units (threshold at 1.8), Word space is 7 units (threshold at 4.5)
         this.charTimeout = setTimeout(() => {
           this.flushCharacter();
-        }, dotLen * 2.5);
+        }, dotLen * 1.8);
         
         this.wordTimeout = setTimeout(() => {
           this.flushWord();
-        }, dotLen * 5.5);
+        }, dotLen * 4.5);
       }
     } else {
       // TONE STARTED (Signal goes from Low -> High)
