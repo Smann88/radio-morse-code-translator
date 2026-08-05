@@ -81,6 +81,29 @@ export class MorseMicReceiver {
         // Loopback mode: Create a gain node that players can connect to directly
         this.loopbackInputNode = this.audioContext.createGain();
         this.loopbackInputNode.connect(this.filterNode);
+      } else if (this.deviceId === 'system') {
+        // System Audio Capture Mode
+        this.mediaStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "browser", // Prefers tab share
+            width: 320,
+            height: 240,
+            frameRate: 1
+          },
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        });
+        const audioTracks = this.mediaStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          // If the user forgot to check the audio share, warn them
+          this.mediaStream.getTracks().forEach(t => t.stop());
+          throw new Error('No system audio track shared. Please check "Share system audio".');
+        }
+        this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+        this.sourceNode.connect(this.filterNode);
       } else {
         // Microphone Mode: Select the target device if specified
         const constraints = {
@@ -90,7 +113,7 @@ export class MorseMicReceiver {
             autoGainControl: false
           }
         };
-        if (this.deviceId) {
+        if (this.deviceId && this.deviceId !== 'default') {
           constraints.audio.deviceId = { exact: this.deviceId };
         }
         
@@ -269,5 +292,36 @@ export class MorseMicReceiver {
     const dataArray = new Uint8Array(bufferLength);
     this.analyserNode.getByteFrequencyData(dataArray);
     return dataArray;
+  }
+
+  // Detects the loudest frequency peak in the 400Hz - 1000Hz range (CW band)
+  detectPeakFrequency() {
+    if (!this.analyserNode || !this.isListening) return null;
+    const fftSize = this.analyserNode.fftSize;
+    const sampleRate = this.audioContext.sampleRate;
+    const bufferLength = this.analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    this.analyserNode.getByteFrequencyData(dataArray);
+
+    // Convert 400Hz and 1000Hz boundaries to FFT bin indexes
+    const minBin = Math.round((400 * fftSize) / sampleRate);
+    const maxBin = Math.round((1000 * fftSize) / sampleRate);
+
+    let maxVal = 0;
+    let peakBin = -1;
+
+    for (let i = minBin; i <= maxBin; i++) {
+      if (dataArray[i] > maxVal) {
+        maxVal = dataArray[i];
+        peakBin = i;
+      }
+    }
+
+    // Only report if the peak is prominent enough (amplitude > 55 out of 255)
+    if (maxVal > 55 && peakBin !== -1) {
+      const detectedFrequency = Math.round((peakBin * sampleRate) / fftSize);
+      return { frequency: detectedFrequency, amplitude: maxVal };
+    }
+    return null;
   }
 }

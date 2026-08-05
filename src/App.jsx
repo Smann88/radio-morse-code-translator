@@ -55,6 +55,8 @@ function App() {
   const [rxError, setRxError] = useState(null);
   const [audioDevices, setAudioDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('default'); // 'default', 'loopback', or actual device ID
+  const [isAutoTune, setIsAutoTune] = useState(false);
+  const lastAutoTuneTimeRef = useRef(0);
 
   // --- MANUAL KEYER STATE ---
   const [keyerDecodedText, setKeyerDecodedText] = useState('');
@@ -476,6 +478,18 @@ function App() {
           ctx.fillStyle = '#ef4444';
           ctx.font = '9px monospace';
           ctx.fillText(`Target: ${pitch}Hz`, targetX - 35, height - 18);
+
+          // Auto-tune peak frequency detection (rate-limited check)
+          if (isAutoTune) {
+            const now = Date.now();
+            if (now - lastAutoTuneTimeRef.current > 180) {
+              const peak = morseReceiverRef.current.detectPeakFrequency();
+              if (peak && Math.abs(peak.frequency - pitch) > 5) {
+                setPitch(peak.frequency);
+                lastAutoTuneTimeRef.current = now;
+              }
+            }
+          }
         }
       } 
       // Else Simulated Waveform if Transmitter or Manual CW Key is Active
@@ -507,7 +521,7 @@ function App() {
     return () => {
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [isRxActive, isTxActive, pitch]);
+  }, [isRxActive, isTxActive, pitch, isAutoTune]);
 
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-start p-4 md:p-8 select-none">
@@ -818,7 +832,7 @@ function App() {
                   </div>
                 )}
 
-                {/* Audio Input Source Dropdown */}
+                 {/* Audio Input Source Dropdown */}
                 <div className="flex flex-col gap-1.5 font-mono">
                   <label className="text-zinc-400 text-xs">Audio Input Source</label>
                   <select
@@ -828,6 +842,7 @@ function App() {
                   >
                     <option value="default">🎙️ System Default Microphone</option>
                     <option value="loopback">🔌 Internal Virtual Loopback (No Microphone Needed)</option>
+                    <option value="system">🖥️ System Audio Capture (via Tab/Screen Share)</option>
                     {audioDevices.map((device, index) => (
                       <option key={device.deviceId || index} value={device.deviceId}>
                         🎙️ {device.label || `Microphone ${index + 1} (${device.deviceId.slice(0, 5)}...)`}
@@ -845,7 +860,9 @@ function App() {
                     </div>
                     <div className="text-[10px] text-zinc-500">
                       {isRxActive 
-                        ? (selectedDeviceId === 'loopback' ? 'Listening to internal loopback...' : 'Listening to microphone...') 
+                        ? (selectedDeviceId === 'loopback' 
+                            ? 'Listening to internal loopback...' 
+                            : (selectedDeviceId === 'system' ? 'Listening to system audio...' : 'Listening to microphone...')) 
                         : 'Receiver inactive'}
                     </div>
                   </div>
@@ -880,23 +897,35 @@ function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-3 font-mono">
                   {/* Current decoding buffer */}
-                  <div className="col-span-1 flex flex-col gap-1">
-                    <span className="text-zinc-400 font-mono text-[10px]">CURRENT SYMBOL</span>
-                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-2.5 font-mono text-center text-lg font-extrabold text-emerald-400 min-h-[2.5rem] tracking-wider">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px]">CURRENT SYMBOL</span>
+                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-center text-sm font-extrabold text-emerald-400 min-h-[2.25rem] tracking-wider leading-relaxed">
                       {rxCurrentMorseBuffer || <span className="text-zinc-800 text-xs">-</span>}
                     </div>
                   </div>
+                  
                   {/* Visual LED status */}
-                  <div className="col-span-2 flex flex-col gap-1">
-                    <span className="text-zinc-400 font-mono text-[10px]">RX SIGNAL DEMODULATOR</span>
-                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-2.5 flex items-center justify-center gap-2 font-mono text-xs min-h-[2.5rem]">
-                      <span className={`w-3.5 h-3.5 rounded-full ${isRxSignalActive ? 'bg-emerald-400 animate-ping' : 'bg-zinc-800'}`}></span>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px]">DEMODULATOR</span>
+                    <div className="w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 flex items-center justify-center gap-1.5 text-[10px] min-h-[2.25rem]">
+                      <span className={`w-2.5 h-2.5 rounded-full ${isRxSignalActive ? 'bg-emerald-400 animate-pulse shadow-[0_0_6px_#10b981]' : 'bg-zinc-850'}`}></span>
                       <span className={isRxSignalActive ? 'text-emerald-400 font-bold' : 'text-zinc-600'}>
-                        {isRxSignalActive ? 'TONE DETECTED' : 'STATIC / NO TONE'}
+                        {isRxSignalActive ? 'ACTIVE' : 'STATIC'}
                       </span>
                     </div>
+                  </div>
+
+                  {/* Auto-Tune (ATN) Button */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px]">AUTO-TUNE</span>
+                    <button
+                      onClick={() => setIsAutoTune(!isAutoTune)}
+                      className={`w-full py-1 px-1 rounded text-[10px] font-bold border transition min-h-[2.25rem] ${isAutoTune ? 'bg-emerald-950/40 border-emerald-500 text-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.2)]' : 'bg-zinc-950 border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      {isAutoTune ? 'ATN: ON' : 'ATN: OFF'}
+                    </button>
                   </div>
                 </div>
 
