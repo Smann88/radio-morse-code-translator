@@ -59,6 +59,8 @@ function App() {
   const [rxError, setRxError] = useState(null);
   const [audioDevices, setAudioDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('default'); // 'default', 'loopback', or actual device ID
+  const [audioOutputs, setAudioOutputs] = useState([]);
+  const [selectedOutputId, setSelectedOutputId] = useState('default');
   const [isAutoTune, setIsAutoTune] = useState(false);
   const [isAutoWpm, setIsAutoWpm] = useState(false);
   const lastAutoTuneTimeRef = useRef(0);
@@ -80,14 +82,31 @@ function App() {
   const keyDownTimeRef = useRef(0);
   const keyUpTimeRef = useRef(0);
 
-  // Enumerate all available physical audio inputs
+  // Enumerate all available physical audio inputs and outputs
   const fetchAudioDevices = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       setAudioDevices(audioInputs);
+      setAudioOutputs(audioOutputs);
     } catch (err) {
       console.warn('Error enumerating audio devices:', err);
+    }
+  };
+
+  const handleOutputDeviceChange = async (sinkId) => {
+    setSelectedOutputId(sinkId);
+    if (morsePlayerRef.current && morsePlayerRef.current.audioContext) {
+      const ctx = morsePlayerRef.current.audioContext;
+      if (typeof ctx.setSinkId === 'function') {
+        try {
+          await ctx.setSinkId(sinkId === 'default' ? '' : sinkId);
+          console.log(`🔊 [Transceiver] Output speaker successfully routed to: ${sinkId}`);
+        } catch (err) {
+          console.error("Error setting output speaker sink ID:", err);
+        }
+      }
     }
   };
 
@@ -735,6 +754,27 @@ function App() {
                   onChange={(e) => setVolume(parseFloat(e.target.value))}
                   className="w-full accent-emerald-500 h-1 bg-zinc-850 rounded"
                 />
+              </div>
+
+              {/* Output Speaker Selection */}
+              <div className="flex flex-col gap-1.5 font-mono mt-1">
+                <div className="flex justify-between text-xs text-zinc-400">
+                  <span className="flex items-center gap-1.5">
+                    <Volume2 className="w-3.5 h-3.5 text-zinc-500" /> OUTPUT (SPEAKERS)
+                  </span>
+                </div>
+                <select
+                  value={selectedOutputId}
+                  onChange={(e) => handleOutputDeviceChange(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[10px] text-zinc-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="default">🔊 Default Audio Speakers</option>
+                  {audioOutputs.map((device, index) => (
+                    <option key={device.deviceId || index} value={device.deviceId}>
+                      🔊 {device.label || `Speaker Output ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
