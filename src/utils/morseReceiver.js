@@ -80,8 +80,8 @@ export class MorseMicReceiver {
 
       // Create Analyser for FFT power spectrum
       this.analyserNode = this.audioContext.createAnalyser();
-      this.analyserNode.fftSize = 2048;
-      this.analyserNode.smoothingTimeConstant = 0.2; // Fast response for dits/dahs
+      this.analyserNode.fftSize = 1024;
+      this.analyserNode.smoothingTimeConstant = 0.0; // Instantaneous temporal response
 
       if (this.isLoopback) {
         // Loopback mode: Create a gain node that players can connect to directly
@@ -253,8 +253,8 @@ export class MorseMicReceiver {
       this.rawStateChangeTime = now;
     }
 
-    // Commits state transition only if it has persisted for at least 15ms (filters room glitch/clicks)
-    const debounceDelay = 15;
+    // Commits state transition only if it has persisted for at least 8ms (filters room glitch/clicks)
+    const debounceDelay = 8;
     if (this.rawSignalState !== this.signalActive && (now - this.rawStateChangeTime >= debounceDelay)) {
       const duration = now - this.lastStateChangeTime - debounceDelay;
       this.lastStateChangeTime = now - debounceDelay;
@@ -271,8 +271,8 @@ export class MorseMicReceiver {
     
     if (wasActive) {
       // TONE ENDED (Signal goes from High -> Low)
-      // Compensate for Web Audio analyser FFT windowing latency (usually around 20-30ms)
-      const adjustedDuration = duration - 32; 
+      // Compensate for Web Audio analyser FFT windowing latency (inherent ~21ms window size)
+      const adjustedDuration = duration - 12; 
       
       // Check for dual-pitch Morse classification
       // If the tone pitch is at least 35Hz above the baseline, it is classified as a dit (.)
