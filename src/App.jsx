@@ -221,6 +221,9 @@ function App() {
         threshold: rxThreshold,
         deviceId: selectedDeviceId !== 'default' && selectedDeviceId !== 'loopback' ? selectedDeviceId : null,
         isLoopback: selectedDeviceId === 'loopback',
+        onPitchChange: (newPitch) => {
+          setPitch(newPitch);
+        },
         onSignalChange: (isActive, level) => {
           setIsRxSignalActive(isActive);
           setRxSignalStrength(Math.min(100, Math.round(level)));

@@ -11,6 +11,7 @@ export class MorseMicReceiver {
     this.onSymbolDecoded = options.onSymbolDecoded || null; // ('.') or ('-')
     this.onCharacterDecoded = options.onCharacterDecoded || null; // ('A', '.-')
     this.onWordDecoded = options.onWordDecoded || null; // ('HELLO')
+    this.onPitchChange = options.onPitchChange || null; // (newPitchHz)
     this.onError = options.onError || null;
 
     this.deviceId = options.deviceId || null;
@@ -167,43 +168,58 @@ export class MorseMicReceiver {
     
     this.analyserNode.getByteFrequencyData(dataArray);
     
-    // Find FFT bin corresponding to our target pitch
-    const targetBin = Math.round((this.pitch * fftSize) / sampleRate);
+    // Define boundaries of the CW Morse frequency range (400Hz - 1000Hz)
+    const minBin = Math.round((400 * fftSize) / sampleRate);
+    const maxBin = Math.round((1000 * fftSize) / sampleRate);
     
-    // 1. Peak Amplitude (average of targetBin and its immediate neighbors for frequency drift)
-    let peakSum = 0;
-    let peakCount = 0;
-    for (let i = targetBin - 1; i <= targetBin + 1; i++) {
+    // Find the strongest peak frequency bin in the CW range
+    let peakAmplitude = 0;
+    let peakBin = -1;
+    let sumAmplitude = 0;
+    let countBins = 0;
+    
+    for (let i = minBin; i <= maxBin; i++) {
       if (i >= 0 && i < bufferLength) {
-        peakSum += dataArray[i];
-        peakCount++;
+        sumAmplitude += dataArray[i];
+        countBins++;
+        if (dataArray[i] > peakAmplitude) {
+          peakAmplitude = dataArray[i];
+          peakBin = i;
+        }
       }
     }
-    const peakAmplitude = peakCount > 0 ? peakSum / peakCount : 0;
-
-    // 2. Local Noise Floor Amplitude (average of slightly further away bins)
-    let noiseSum = 0;
-    let noiseCount = 0;
-    const noiseOffsets = [-8, -7, -6, -5, 5, 6, 7, 8];
-    for (const offset of noiseOffsets) {
-      const idx = targetBin + offset;
-      if (idx >= 0 && idx < bufferLength) {
-        noiseSum += dataArray[idx];
-        noiseCount++;
-      }
-    }
-    const noiseFloor = noiseCount > 0 ? noiseSum / noiseCount : 0;
-
-    // 3. Prominence Index (signal strength above local noise floor)
-    const diff = Math.max(0, peakAmplitude - noiseFloor);
-    // Scale so that a 20dB prominence matches 100% signal strength
-    const signalStrength = Math.min(100, (diff / 35) * 100);
     
-    // Check signal state
-    const isActiveNow = signalStrength > this.threshold;
+    // Average amplitude of the entire band (used as dynamic noise floor)
+    const averageBandAmplitude = countBins > 0 ? sumAmplitude / countBins : 0;
+    
+    // If we found a peak, measure its prominence above the band average noise floor
+    let prominence = 0;
+    let peakFreq = this.pitch; // default to current VFO pitch
+    
+    if (peakBin !== -1) {
+      peakFreq = Math.round((peakBin * sampleRate) / fftSize);
+      prominence = Math.max(0, peakAmplitude - averageBandAmplitude);
+    }
+    
+    // Convert prominence to a 0-100% signal strength
+    // A 30dB prominence stands out clearly and represents 100% signal strength
+    const signalStrength = Math.min(100, (prominence / 30) * 100);
+    
+    // Decide if a Morse beep is active in the range
+    // If the signal strength is above threshold and peakAmplitude is prominent enough (>50)
+    const isActiveNow = (signalStrength > this.threshold) && (peakAmplitude > 55);
     
     if (this.onSignalChange) {
       this.onSignalChange(isActiveNow, signalStrength);
+    }
+    
+    // Auto-update the receiver's pitch if there is an active prominent beep in the band
+    // This allows the VFO to automatically track and sync to the tone's exact frequency!
+    if (isActiveNow && peakFreq >= 400 && peakFreq <= 1000 && peakFreq !== this.pitch) {
+      this.pitch = peakFreq;
+      if (this.onPitchChange) {
+        this.onPitchChange(peakFreq);
+      }
     }
     
     // --- DEBOUNCE SCHMITT TRIGGER HYSTERESIS ---
