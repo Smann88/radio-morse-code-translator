@@ -100,9 +100,9 @@ export class MorseMicReceiver {
         // Microphone Mode: Select the target device if specified
         const constraints = {
           audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
+            echoCancellation: { ideal: false },
+            noiseSuppression: { ideal: false },
+            autoGainControl: { ideal: false }
           }
         };
         if (this.deviceId && this.deviceId !== 'default') {
@@ -206,54 +206,68 @@ export class MorseMicReceiver {
       this.onSignalChange(isActiveNow, signalStrength);
     }
     
-    this.processSignalState(isActiveNow);
+    // --- DEBOUNCE SCHMITT TRIGGER HYSTERESIS ---
+    const now = Date.now();
+    if (this.rawSignalState === undefined) {
+      this.rawSignalState = false;
+      this.rawStateChangeTime = now;
+    }
+
+    if (isActiveNow !== this.rawSignalState) {
+      this.rawSignalState = isActiveNow;
+      this.rawStateChangeTime = now;
+    }
+
+    // Commits state transition only if it has persisted for at least 15ms (filters room glitch/clicks)
+    const debounceDelay = 15;
+    if (this.rawSignalState !== this.signalActive && (now - this.rawStateChangeTime >= debounceDelay)) {
+      const duration = now - this.lastStateChangeTime - debounceDelay;
+      this.lastStateChangeTime = now - debounceDelay;
+      
+      const wasActive = this.signalActive;
+      this.signalActive = this.rawSignalState;
+      
+      this.processSignalTransition(wasActive, duration);
+    }
   };
 
-  processSignalState(isActiveNow) {
-    const now = Date.now();
+  processSignalTransition(wasActive, duration) {
     const dotLen = getDotLength(this.wpm);
     
-    if (isActiveNow !== this.signalActive) {
-      // Signal Transition
-      const duration = now - this.lastStateChangeTime;
-      this.lastStateChangeTime = now;
-      this.signalActive = isActiveNow;
+    if (wasActive) {
+      // TONE ENDED (Signal goes from High -> Low)
+      // Compensate for Web Audio analyser FFT windowing latency (usually around 20-30ms)
+      const adjustedDuration = duration - 22; 
       
-      if (!isActiveNow) {
-        // TONE ENDED (Signal goes from High -> Low)
-        // A tone just finished. Decide if it was a dot or a dash.
-        // Dot: 1 unit. Dash: 3 units.
-        // Let's threshold at 1.8 * dotLength.
-        if (duration > 15) { // Debounce extremely short glitches (< 15ms)
-          const isDash = duration >= (dotLen * 1.8);
-          const symbol = isDash ? '-' : '.';
-          
-          this.currentMorseChar += symbol;
-          
-          if (this.onSymbolDecoded) {
-            this.onSymbolDecoded(symbol);
-          }
-          
-          // Clear previous timeout and start character/word timers
-          clearTimeout(this.charTimeout);
-          clearTimeout(this.wordTimeout);
-          
-          // Character space is 3 units. Threshold at 2.5 * dotLength.
-          this.charTimeout = setTimeout(() => {
-            this.flushCharacter();
-          }, dotLen * 2.5);
-          
-          // Word space is 7 units. Threshold at 5.5 * dotLength.
-          this.wordTimeout = setTimeout(() => {
-            this.flushWord();
-          }, dotLen * 5.5);
+      if (adjustedDuration > 15) { // Ensure minimum symbol length
+        // Midpoint of 2.0 * dotLen is optimal for separating dots and dashes
+        const isDash = adjustedDuration >= (dotLen * 2.0);
+        const symbol = isDash ? '-' : '.';
+        
+        this.currentMorseChar += symbol;
+        
+        if (this.onSymbolDecoded) {
+          this.onSymbolDecoded(symbol);
         }
-      } else {
-        // TONE STARTED (Signal goes from Low -> High)
-        // Silence has ended. We cancel character/word flush timers because the user is still keying.
+        
+        // Clear previous timeouts and set spacing flushes
         clearTimeout(this.charTimeout);
         clearTimeout(this.wordTimeout);
+        
+        // Spacing: Letter space is 3 units, Word space is 7 units
+        this.charTimeout = setTimeout(() => {
+          this.flushCharacter();
+        }, dotLen * 2.5);
+        
+        this.wordTimeout = setTimeout(() => {
+          this.flushWord();
+        }, dotLen * 5.5);
       }
+    } else {
+      // TONE STARTED (Signal goes from Low -> High)
+      // Silence ended: cancel pending character/word flushes
+      clearTimeout(this.charTimeout);
+      clearTimeout(this.wordTimeout);
     }
   }
 

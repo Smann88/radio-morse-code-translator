@@ -47,7 +47,7 @@ function App() {
   
   // --- RECEIVER STATE ---
   const [isRxActive, setIsRxActive] = useState(false);
-  const [rxThreshold, setRxThreshold] = useState(25); // Sensitivity dB/Strength
+  const [rxThreshold, setRxThreshold] = useState(15); // Sensitivity dB/Strength (more sensitive by default)
   const [rxDecodedText, setRxDecodedText] = useState('');
   const [rxCurrentMorseBuffer, setRxCurrentMorseBuffer] = useState('');
   const [rxSignalStrength, setRxSignalStrength] = useState(0);
