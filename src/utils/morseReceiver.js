@@ -237,13 +237,15 @@ export class MorseMicReceiver {
     if (wasActive) {
       // TONE ENDED (Signal goes from High -> Low)
       // Compensate for Web Audio analyser FFT windowing latency (usually around 20-30ms)
-      const adjustedDuration = duration - 22; 
+      const adjustedDuration = duration - 32; 
+      
+      // Midpoint of 2.2 * dotLen is optimal for separating dots and dashes with safety headroom
+      const isDash = adjustedDuration >= (dotLen * 2.2);
+      const symbol = isDash ? '-' : '.';
+      
+      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 2.0)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${this.wpm}). Decoded Symbol: "${symbol}"`);
       
       if (adjustedDuration > 15) { // Ensure minimum symbol length
-        // Midpoint of 2.0 * dotLen is optimal for separating dots and dashes
-        const isDash = adjustedDuration >= (dotLen * 2.0);
-        const symbol = isDash ? '-' : '.';
-        
         this.currentMorseChar += symbol;
         
         if (this.onSymbolDecoded) {
