@@ -13,10 +13,14 @@ export class MorseMicReceiver {
     this.onWordDecoded = options.onWordDecoded || null; // ('HELLO')
     this.onError = options.onError || null;
 
+    this.deviceId = options.deviceId || null;
+    this.isLoopback = options.isLoopback || false;
+
     // Web Audio State
     this.audioContext = null;
     this.mediaStream = null;
     this.sourceNode = null;
+    this.loopbackInputNode = null;
     this.filterNode = null;
     this.analyserNode = null;
     
@@ -53,14 +57,6 @@ export class MorseMicReceiver {
     if (this.isListening) return;
     
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        }
-      });
-      
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       
       // Resuming context if suspended (common browser policy)
@@ -68,8 +64,6 @@ export class MorseMicReceiver {
         await this.audioContext.resume();
       }
 
-      this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-      
       // Create an aggressive narrow Bandpass Filter
       // Center frequency is the target beep pitch
       // Q is Quality factor. Higher Q = narrower bandwidth. Q = 25 is excellent for isolating a beep.
@@ -83,8 +77,28 @@ export class MorseMicReceiver {
       this.analyserNode.fftSize = 2048;
       this.analyserNode.smoothingTimeConstant = 0.4; // Slightly smooth out transient spikes
 
-      // Connect graph: Mic -> Filter -> Analyser
-      this.sourceNode.connect(this.filterNode);
+      if (this.isLoopback) {
+        // Loopback mode: Create a gain node that players can connect to directly
+        this.loopbackInputNode = this.audioContext.createGain();
+        this.loopbackInputNode.connect(this.filterNode);
+      } else {
+        // Microphone Mode: Select the target device if specified
+        const constraints = {
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        };
+        if (this.deviceId) {
+          constraints.audio.deviceId = { exact: this.deviceId };
+        }
+        
+        this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+        this.sourceNode.connect(this.filterNode);
+      }
+
       this.filterNode.connect(this.analyserNode);
 
       this.isListening = true;
@@ -122,6 +136,7 @@ export class MorseMicReceiver {
     }
 
     this.sourceNode = null;
+    this.loopbackInputNode = null;
     this.filterNode = null;
     this.analyserNode = null;
     this.signalActive = false;

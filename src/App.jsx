@@ -53,6 +53,8 @@ function App() {
   const [rxSignalStrength, setRxSignalStrength] = useState(0);
   const [isRxSignalActive, setIsRxSignalActive] = useState(false);
   const [rxError, setRxError] = useState(null);
+  const [audioDevices, setAudioDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState('default'); // 'default', 'loopback', or actual device ID
 
   // --- MANUAL KEYER STATE ---
   const [keyerDecodedText, setKeyerDecodedText] = useState('');
@@ -71,8 +73,21 @@ function App() {
   const keyDownTimeRef = useRef(0);
   const keyUpTimeRef = useRef(0);
 
+  // Enumerate all available physical audio inputs
+  const fetchAudioDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      setAudioDevices(audioInputs);
+    } catch (err) {
+      console.warn('Error enumerating audio devices:', err);
+    }
+  };
+
   // Initialize Engines on Mount
   useEffect(() => {
+    fetchAudioDevices();
+
     // Instantiate Player
     morsePlayerRef.current = new MorsePlayer();
     morsePlayerRef.current.pitch = pitch;
@@ -191,6 +206,9 @@ function App() {
       setIsRxActive(false);
       setIsRxSignalActive(false);
       setRxSignalStrength(0);
+      if (morsePlayerRef.current) {
+        morsePlayerRef.current.loopbackDestinationNode = null;
+      }
     } else {
       // Start Receiver
       setRxError(null);
@@ -199,6 +217,8 @@ function App() {
         wpm: wpm,
         pitch: pitch,
         threshold: rxThreshold,
+        deviceId: selectedDeviceId !== 'default' && selectedDeviceId !== 'loopback' ? selectedDeviceId : null,
+        isLoopback: selectedDeviceId === 'loopback',
         onSignalChange: (isActive, level) => {
           setIsRxSignalActive(isActive);
           setRxSignalStrength(Math.min(100, Math.round(level)));
@@ -222,8 +242,37 @@ function App() {
 
       await morseReceiverRef.current.start();
       setIsRxActive(true);
+
+      // Re-fetch devices to update actual labels now that mic permission is given
+      fetchAudioDevices();
+
+      // Hook up loopback routing if selected
+      if (selectedDeviceId === 'loopback' && morseReceiverRef.current && morsePlayerRef.current) {
+        morsePlayerRef.current.audioContext = morseReceiverRef.current.audioContext;
+        morsePlayerRef.current.loopbackDestinationNode = morseReceiverRef.current.loopbackInputNode;
+      } else if (morsePlayerRef.current) {
+        morsePlayerRef.current.loopbackDestinationNode = null;
+      }
     }
   };
+
+  // Hot-swap receiver device on source selection change
+  useEffect(() => {
+    if (isRxActive) {
+      const restart = async () => {
+        if (morseReceiverRef.current) {
+          morseReceiverRef.current.stop();
+        }
+        setIsRxActive(false);
+        setIsRxSignalActive(false);
+        setRxSignalStrength(0);
+        setTimeout(() => {
+          toggleReceiver();
+        }, 150);
+      };
+      restart();
+    }
+  }, [selectedDeviceId]);
 
   // Sync Threshold & Settings with Active Receiver
   useEffect(() => {
@@ -769,6 +818,24 @@ function App() {
                   </div>
                 )}
 
+                {/* Audio Input Source Dropdown */}
+                <div className="flex flex-col gap-1.5 font-mono">
+                  <label className="text-zinc-400 text-xs">Audio Input Source</label>
+                  <select
+                    value={selectedDeviceId}
+                    onChange={(e) => setSelectedDeviceId(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded p-2.5 text-xs text-zinc-300 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="default">🎙️ System Default Microphone</option>
+                    <option value="loopback">🔌 Internal Virtual Loopback (No Microphone Needed)</option>
+                    {audioDevices.map((device, index) => (
+                      <option key={device.deviceId || index} value={device.deviceId}>
+                        🎙️ {device.label || `Microphone ${index + 1} (${device.deviceId.slice(0, 5)}...)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Mic listening switch */}
                 <div className="flex items-center justify-between bg-zinc-950 p-4 border border-zinc-800 rounded">
                   <div className="font-mono">
@@ -777,14 +844,16 @@ function App() {
                       RECEIVE STATE
                     </div>
                     <div className="text-[10px] text-zinc-500">
-                      {isRxActive ? 'Listening to microphone...' : 'Microphone receiver inactive'}
+                      {isRxActive 
+                        ? (selectedDeviceId === 'loopback' ? 'Listening to internal loopback...' : 'Listening to microphone...') 
+                        : 'Receiver inactive'}
                     </div>
                   </div>
                   <button
                     onClick={toggleReceiver}
                     className={`py-2 px-5 rounded font-mono font-bold text-xs border transition ${isRxActive ? 'bg-red-950/40 border-red-500 text-red-400 hover:bg-red-900/40' : 'bg-emerald-500 border-emerald-400 text-zinc-950 hover:bg-emerald-400 shadow'}`}
                   >
-                    {isRxActive ? 'DISCONNECT MIC' : 'CONNECT DECODER'}
+                    {isRxActive ? 'DISCONNECT' : 'CONNECT DECODER'}
                   </button>
                 </div>
 

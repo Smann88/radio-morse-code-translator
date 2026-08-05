@@ -181,6 +181,7 @@ export class MorsePlayer {
     this.activeOscillator = null;
     this.activeGainNode = null;
     this.activeTimeouts = [];
+    this.loopbackDestinationNode = null;
   }
   
   initAudio() {
@@ -210,6 +211,9 @@ export class MorsePlayer {
 
     this.oscillator.connect(this.gainNode);
     this.gainNode.connect(ctx.destination);
+    if (this.loopbackDestinationNode) {
+      this.gainNode.connect(this.loopbackDestinationNode);
+    }
 
     this.oscillator.start();
   }
@@ -253,6 +257,9 @@ export class MorsePlayer {
     gainNode.gain.setValueAtTime(0, ctx.currentTime);
     osc.connect(gainNode);
     gainNode.connect(ctx.destination);
+    if (this.loopbackDestinationNode) {
+      gainNode.connect(this.loopbackDestinationNode);
+    }
     osc.start();
 
     this.activeOscillator = osc;
