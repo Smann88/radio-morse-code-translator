@@ -290,8 +290,8 @@ export class MorseMicReceiver {
       // Adaptive WPM speed tracking ( Париж / PARIS standard )
       if (this.autoWpm && adjustedDuration > 15) {
         let detectedDot = adjustedDuration;
-        // Midpoint of 2.2 * current dotLen separates dot and dash candidates
-        if (adjustedDuration >= dotLen * 2.2) {
+        // Midpoint of 1.8 * current dotLen separates dot and dash candidates
+        if (adjustedDuration >= dotLen * 1.8) {
           detectedDot = adjustedDuration / 3.0; // dah is 3 units
         }
         
@@ -324,12 +324,12 @@ export class MorseMicReceiver {
         symbol = pitchDiff > 0 ? '.' : '-';
         console.log(`📻 [DSP DECODER] Dual-Pitch Classification! Tone Freq: ${this.activeTonePitch}Hz (Base VFO: ${this.basePitch}Hz, Diff: ${pitchDiff}Hz) -> Decoded: "${symbol}"`);
       } else {
-        // Standard Fallback: Midpoint of 2.2 * dotLen is optimal for separating dits and dashes
-        const isDash = adjustedDuration >= (dotLen * 2.2);
+        // Standard Fallback: Midpoint of 1.8 * dotLen is mathematically optimal for separating dits and dashes
+        const isDash = adjustedDuration >= (dotLen * 1.8);
         symbol = isDash ? '-' : '.';
       }
       
-      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 2.2)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${currentWpm}, ToneFreq: ${this.activeTonePitch}Hz). Decoded Symbol: "${symbol}"`);
+      console.log(`📻 [DSP DECODER] Tone Ended. Raw: ${duration}ms, Adjusted: ${adjustedDuration}ms, Midpoint Threshold: ${Math.round(dotLen * 1.8)}ms (DotLen: ${Math.round(dotLen)}ms, WPM: ${currentWpm}, ToneFreq: ${this.activeTonePitch}Hz). Decoded Symbol: "${symbol}"`);
       
       if (adjustedDuration > 15) { // Ensure minimum symbol length
         this.currentMorseChar += symbol;
@@ -342,14 +342,17 @@ export class MorseMicReceiver {
         clearTimeout(this.charTimeout);
         clearTimeout(this.wordTimeout);
         
-        // Spacing: Letter space is 3 units (threshold at 1.8), Word space is 7 units (threshold at 4.5)
+        // Dynamic speed-adaptive flusher with protective bounds to guard against browser thread latency
+        const charTimeoutMs = Math.max(120, Math.min(260, dotLen * 2.2));
+        const wordTimeoutMs = Math.max(280, Math.min(620, dotLen * 5.2));
+        
         this.charTimeout = setTimeout(() => {
           this.flushCharacter();
-        }, dotLen * 1.8);
+        }, charTimeoutMs);
         
         this.wordTimeout = setTimeout(() => {
           this.flushWord();
-        }, dotLen * 4.5);
+        }, wordTimeoutMs);
       }
     } else {
       // TONE STARTED (Signal goes from Low -> High)
